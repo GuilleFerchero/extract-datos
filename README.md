@@ -4,13 +4,17 @@ Este repositorio contiene rutinas y scripts para la **extracción, limpieza y or
 
 ## 📂 Estructura de carpetas
 
-automatizacion-datos/
-│
-├── datos/ # Archivos crudos descargados (CSV, JSON, XLSX, etc.)
-├── scripts/ # Scripts de R o Python para extracción y procesamiento
-├── informes/ # Documentos, reportes, notebooks o dashboards
-├── docs/ # Documentación adicional del proyecto
-└── README.md # Presentación del proyecto
+
+
+datos/ # Archivos crudos descargados (CSV, JSON, XLSX, etc.)
+
+scripts/ # Scripts de R o Python para extracción y procesamiento
+
+informes/ # Documentos, reportes, notebooks o dashboards
+
+docs/ # Documentación adicional del proyecto
+
+README.md # Presentación del proyecto
 
 
 
