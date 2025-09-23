@@ -1,0 +1,140 @@
+---
+title: "inmuebles_R"
+format: html
+editor: visual
+---
+
+## Quarto
+
+```{r}
+source("../librerias.R")
+library("jsonlite")
+```
+
+```{r}
+
+url <- 'https://www.argenprop.com/inmuebles-alquiler-localidad-capital-federal'
+
+# # 3. Hacer la solicitud a la página web
+# # Usamos GET() de httr y user_agent() para simular un navegador
+# search <- GET(url, user_agent("Mozilla/5.0"))
+# 
+# # 4. Chequear el status de la conexión
+# # status_code() nos da el código de la respuesta
+# print(paste("El status es:", status_code(search)))
+# 
+# # 5. Parsear el contenido del request como HTML
+# # read_html() de rvest toma el contenido de la respuesta y lo convierte en un objeto que podemos analizar
+# search_parseada <- read_html(search)
+# 
+# # 6. Printear el contenido para ver qué onda
+# # Al imprimir el objeto, R nos muestra la estructura del documento HTML
+# print(search_parseada)
+
+
+```
+
+```{r}
+
+aux_url_depto <- function(card, base) {
+  url <- card %>% html_node("a.card") %>% html_attr("href")
+  if (!is.na(url)) paste0(base, url) else NA
+}
+
+```
+
+
+
+```{r}
+
+detecta_urls_deptos <- function(url_pagina, base) {
+  page <- read_html(url_pagina)
+  cards <- page %>% html_nodes(".listing__item")
+  urls <- map_chr(cards, aux_url_depto, base = base)
+  urls[!is.na(urls)]
+}
+
+```
+
+
+```{r}
+
+saca_info_depto <- function(url_depto) {
+  page <- read_html(url_depto)
+  
+  info <- list(
+    url = url_depto,
+    direccion = page %>% html_node("h2.titlebar__address") %>% html_text(trim = TRUE),
+    precio = page %>% html_node(".titlebar__price") %>% html_text(trim = TRUE),
+    ambientes = page %>% html_node("li:contains('ambiente')") %>% html_text(trim = TRUE),
+    sup_total = page %>% html_node("li:contains('m²')") %>% html_text(trim = TRUE),
+    lat = NA_real_,
+    lon = NA_real_
+  )
+  
+  # Extraer lat/lon desde div.map-container si existe
+  map_div <- page %>% html_node("div.map-container")
+  if(!is.null(map_div)) {
+    info$lat <- map_div %>% html_attr("data-latitude") %>% as.numeric()
+    info$lon <- map_div %>% html_attr("data-longitude") %>% as.numeric()
+  }
+  
+  return(info)
+}
+
+
+
+```
+
+
+
+```{r}
+paginas_urls_info <- function(url_base, base = "https://www.argenprop.com", 
+                              cantidad_paginas = 1, desde = 1) {
+  resultados <- list()
+  url_pagina <- url_base
+  
+  for (k in desde:cantidad_paginas) {
+    message("Procesando página ", k)
+    urls <- detecta_urls_deptos(url_pagina, base)
+    
+    # scrapeo depto por depto
+    deptos_info <- map(urls, possibly(saca_info_depto, otherwise = NULL))
+    
+    # filtrar resultados válidos
+    resultados[[k]] <- map_dfr(deptos_info, ~.x)
+    
+    # siguiente página
+    if (k == desde) {
+      url_pagina <- paste0(url_base, "-pagina-", k + 1)
+    } else {
+      url_pagina <- sub(paste0("-pagina-", k), paste0("-pagina-", k + 1), url_pagina)
+    }
+    
+    Sys.sleep(runif(1, 0.5, 1.5))  # pausa anti-baneo
+  }
+  
+  bind_rows(resultados)
+}
+
+
+
+
+```
+
+
+
+
+```{r}
+
+url_bn <- "https://www.argenprop.com/departamentos/venta/br-norte"
+
+df_bn <- paginas_urls_info(url_bn, cantidad_paginas = 2)
+
+print(head(df_bn))
+
+
+```
+
+
+

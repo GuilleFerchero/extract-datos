@@ -1,0 +1,318 @@
+---
+title: "Scrapeo Inmuebles"
+format: html
+editor: visual
+---
+
+# Inmuebles
+
+Archivo de trabajo que combina técnicas de scrapeo
+
+## Ideas
+
+La idea es obtener registros de propiedades automatizando descargas
+
+## Objetivos
+
+Generar mapas para visualizar el valor del mt2 en AMBA. 
+Generar una shiny app que permita filtrar por distintos atributos
+
+### Extracción con Python
+
+```{python}
+from bs4 import BeautifulSoup as bs
+import pandas as pd
+import requests
+
+url = 'https://www.argenprop.com/inmuebles-alquiler-localidad-capital-federal' # La url que nos muestra muchos deptos
+search = requests.get(url, verify = True, headers = {"User-Agent":'Mozilla/5.0'}) # Hacemos el request a la página para acceder a la misma
+print(f'El status es: {search.status_code}') # Chequeamos que haya salido todo bien
+search_parseada = bs(search.content, 'html.parser') # Parseamos el contenido del request como un html
+print(search_parseada.prettify()[:20000]) # Printeamos los primeros n caracteres para ver qué onda
+
+```
+
+
+Viendo la estructura del html que aparece cuando inspeccionamos los elementos asociados a departamentos, podemos darnos cuenta dos cosas:
+
+Cada departamento aparece dentro de un tag de nombre div y atributo class = listing__item
+La metadata de cada depto está contenida en el tag anterior, con tag de nombre a y atributos class = card
+El url de cada depto aparece como un atributo href correspondiente al tag en cuestión. Por lo tato, podremos acceder al mismo haciendo tag_depto.attrs['href']
+Utilizaremos los métodos .findAll(name, attrs) para encontrar todos los tags de deptos y .find(name, attrs) dentro de cada depto para encontrar el url de cada depto
+
+```{python}
+tag_depto_1 = search_parseada.find(name = 'div', attrs = {'class' : 'listing__item'}) # tag padre que contiene metadata del primer depto
+print(tag_depto_1.prettify()[:200]) # Vemos el tag general del primer depto
+
+```
+```{python}
+# Si queremos buscar todos los deptos que aparecen en la página, usamos el find_all para la primera búsqueda que hicimos
+tag_deptos = search_parseada.findAll(name = 'div', attrs = {'class' : 'listing__item'})
+print(f'El tipo de objeto es: {type(tag_deptos)}, que puede ser tratado como una lista (es decir, podemos recorrerla)')
+print(f'La cantidad de deptos que encontramos es: {len(tag_deptos)}')
+```
+
+```{python}
+# Entonces, si queremos todos los urls de estos deptos, podemos hacer la siguiente iteración:
+base = 'https://www.argenprop.com' # Defino el dominio de argenprop para agregárselo a los href de cada depto
+
+url_deptos = [base + t.find(name = 'a', attrs = {'class' : 'card'}).attrs['href'] for t in tag_deptos] 
+
+url_deptos # Y así obtenemos la lsita de los primeros 20 departamentos mostrados en la primera página de argenprop
+
+```
+
+
+
+```{python}
+url_depto = url_deptos[1]
+search_depto = requests.get(url_depto, verify = True, headers = {"User-Agent":'Mozilla/5.0'})
+print(f'El status es: {search_depto.status_code}') # Chequeamos que haya salido todo bien
+search_depto_parseada = bs(search_depto.content, 'html.parser')
+print(search_depto_parseada.prettify()[:20000])
+
+```
+
+
+
+```{python}
+
+ubicacion = search_depto_parseada.find(name = 'div', attrs = {'class' : 'map-container'}).findNext().attrs
+print(ubicacion)
+print(f'Latitud : {ubicacion["data-latitude"]}')
+print(f'Longitud : {ubicacion["data-longitude"]}')
+```
+
+
+```{python}
+caracteristicas = search_depto_parseada.findAll('ul',
+                                                attrs = {'class' : 'property-features'}
+                                                )
+print(caracteristicas[2].prettify)
+```
+
+
+```{python}
+import time
+import numpy as np
+```
+
+```{python}
+
+def aux_url_depto(depto,*args):
+    """
+    Esta función auxiliar nos va a permitir evitar errores asociados a tags que no sean de deptos o bien no tengan el url definido.
+    """
+    try:
+        return base + depto.find(name = 'a',
+                             attrs = {'class' : 'card'}
+                             ).attrs['href']
+    except:
+        return None
+def detecta_urls_deptos(url_pagina_busqueda, base):
+    """
+    Esta función, busca los urls de los departamentos, dada una determinada página
+    y devuelve una lista con los urls de cada depto
+
+    Parameters
+    ----------
+    url_pagina_busqueda : string
+        url que se scrapea en búsqueda de los dptos.
+    base : string
+        url base de la página, se usa para devolver el url del depto listo para usar.
+
+    Returns
+    -------
+    urls_deptos : list
+        Lista que contiene los urls de los deptos de cada página.
+
+    """
+    soup = bs(requests.get(url_pagina_busqueda, verify = True, headers = {"User-Agent":'Mozilla/5.0'}).content,
+                         'html.parser',
+                         )
+    
+    urls_deptos = [aux_url_depto(depto, base) for depto in soup.find_all(name = 'div',
+                                                                        attrs = {'class' : 'listing__item'},
+                                                                        )
+                   ]
+        
+    return urls_deptos
+
+def saca_info_depto(url_depto):
+    """
+    Nos devuelve, dado un url de depto, la información asociada al mismo
+
+    Parameters
+    ----------
+    url_depto : string
+        cada url de un depto.
+
+    Returns
+    -------
+    info_depto : dict
+        diccionario de atributos del depto, si no encuentra el atributo, sale ''.
+
+    """
+    
+    info_depto = {
+                  'ubicacion' : None,
+                  'latitud' : None,
+                  'longitud' : None,
+                  'cant_dorms' : None,
+                  'cant_banos' : None,
+                  'antiguedad' : None,
+                  'expensas' : None,
+                  'precio' : None,
+                  'moneda' : None,
+                  'sup_cubierta' : None,
+                  'sup_descubierta' : None,
+                  'url' : None}
+    
+    soup = bs(requests.get(url_depto, verify = True, headers = {"User-Agent":'Mozilla/5.0'}
+    				       ).content,
+                         'html.parser'
+                         )
+    info_depto['url'] = url_depto
+    try:
+        ubicacion = soup.find(name = 'div', attrs = {'class' : 'map-container'}).find_next().attrs
+        info_depto['latitud'] = ubicacion['data-latitude'].replace(',','.')
+        info_depto['longitud'] = ubicacion['data-longitude'].replace(',','.')
+    except:
+        pass
+    
+    try:
+        info_depto['ubicacion'] = soup.find('h2', {'class' : 'titlebar__address'}).text.lower()
+    except:
+        pass        
+    caracteristicas = soup.find_all('ul',
+                                   attrs = {'class' : 'property-features'}
+                                   )
+    try:
+        info_depto['cant_banos'] = soup.find('i', {'class' : 'icono-cantidad_banos'}).find_next().find_next().text
+    except:
+        pass
+    try:
+        info_depto['cant_dorms'] = soup.find('i', {'class' : 'icono-cantidad_dormitorios'}).find_next().find_next().text
+    except:
+        pass
+    for caracteristica in caracteristicas:
+        for child in caracteristica.find_all(name = 'p'):
+            lista_attrs = child.text.replace(':','').replace('.','').split()
+            if 'Dormitorios' in lista_attrs:
+                info_depto['cant_dorms'] = lista_attrs[-1]
+            elif 'Baños' in lista_attrs:
+                info_depto['cant_banos'] = lista_attrs[-1]
+            elif 'Antiguedad' in lista_attrs:
+                info_depto['antiguedad'] = lista_attrs[-1]
+            elif 'Expensas' in lista_attrs and '$' in lista_attrs:
+                info_depto['expensas'] = lista_attrs[-1]
+            elif 'Precio' in lista_attrs and '$' in lista_attrs:
+                info_depto['precio'] = lista_attrs[-1]
+                info_depto['moneda'] = lista_attrs[lista_attrs.index('$')]
+            elif 'Precio' in lista_attrs and 'USD' in lista_attrs:
+                info_depto['precio'] = lista_attrs[-1]
+                info_depto['moneda'] = lista_attrs[lista_attrs.index('USD')]                
+            elif 'Sup' in lista_attrs and 'Cubierta' in lista_attrs:
+                info_depto['sup_cubierta'] = lista_attrs[-2].replace(',','.')
+            elif 'Sup' in lista_attrs and 'Descubierta' in lista_attrs:
+                info_depto['sup_descubierta'] = lista_attrs[-2].replace(',','.')
+            
+    
+    return info_depto
+
+def paginas_urls_info(url_pagina_busqueda, base,cantidad_de_paginas, desde = 1):
+    """
+    Esta función reúne a todas las anteriores, de forma tal de recorrer la cantidad de páginas que le indiquemos,
+    e ir sacando info de cada depto, tipo diccionario
+    """
+    info_deptos = {}
+    id_depto = 1
+    for k in range(desde, cantidad_de_paginas + 1):
+        lista_deptos = detecta_urls_deptos(url_pagina_busqueda, base)
+        lista_deptos = [depto for depto in lista_deptos if depto != None]
+        for url_depto in lista_deptos:
+            info_deptos[id_depto] = saca_info_depto(url_depto)
+            time.sleep(1 * np.random.random())
+            id_depto += 1
+        
+        if k == desde:
+            url_pagina_busqueda += '-pagina-{}'.format(desde)
+            
+        url_pagina_busqueda = url_pagina_busqueda.replace('-pagina-{}'.format(k),
+                                                          '-pagina-{}'.format(k + 1))
+
+    
+    return info_deptos
+```
+
+```{python}
+
+base = 'https://www.argenprop.com'
+url = 'https://www.argenprop.com/departamento-alquiler-localidad-capital-federal-orden-masnuevos'
+
+info_deptos = paginas_urls_info(url,
+                                base,
+                                cantidad_de_paginas = 4)
+```
+
+```{python}
+# Veamos la pinta de esta info:
+print(f'El tipo de la info es: {type(info_deptos)}')
+print(f'Las claves son: {info_deptos.keys()}')
+print('Osea, cada entrada del diccionario es un depto distinto')
+
+print(info_deptos[1])
+```
+```{python}
+info_deptos = pd.DataFrame(info_deptos).T
+info_deptos
+```
+
+```{python}
+
+info_deptos.to_csv("datos.csv")
+
+```
+
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+
+rm(list = ls()) 
+options(scipen = 999)
+
+###################################################################################
+# Instalamos librerías de trabajo
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load("lubridate",
+               "tidyverse",
+               "leaflet",
+               "sf",
+               "tidymodels",
+               "spatialsample",
+               "themis",
+               "ggmap",
+               "showtext",
+               "ggtext",
+               "rvest",
+               "RSelenium",
+               "wdman")
+
+################################################################################### 
+
+
+```
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| 
+data <- read_csv("datos.csv")
+
+```
+
+
+
